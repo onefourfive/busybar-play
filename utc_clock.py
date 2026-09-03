@@ -16,6 +16,10 @@ APP_ID = "utc_clock"
 
 SCREEN_WIDTH = 72
 DEFAULT_TIMEZONE_INTERVAL = 10.0
+TIME_GROUP_X_POSITIONS = (21, 35, 49)
+COLON_X_POSITIONS = (28, 42)
+TEXT_COLOR = "#FFFFFFFF"
+DIM_COLON_COLOR = "#666666FF"
 TIMEZONES = (
     ZoneInfo("Australia/Adelaide"),
     ZoneInfo("Europe/Berlin"),
@@ -43,25 +47,21 @@ def capture_screen(
     return path
 
 
-def format_time(now: datetime, colons_visible: bool) -> str:
-    """Format the time, hiding colons during the dim half of the pulse."""
-    formatted = now.strftime("%H:%M:%S")
-    return formatted if colons_visible else formatted.replace(":", " ")
-
-
 def draw_clock(
     busy_bar: BusyBar,
     display_timezone: ZoneInfo | timezone,
     *,
-    colons_visible: bool | None = None,
+    colons_bright: bool | None = None,
+    clear_before_draw: bool = False,
 ) -> None:
     now = datetime.now(display_timezone)
-    if colons_visible is None:
-        colons_visible = now.microsecond < 500_000
+    if colons_bright is None:
+        colons_bright = now.microsecond < 500_000
 
     date_text = now.strftime("%Y.%m.%d")
-    time_text = format_time(now, colons_visible)
+    time_parts = now.strftime("%H:%M:%S").split(":")
     timezone_text = now.strftime("%Z")
+    colon_color = TEXT_COLOR if colons_bright else DIM_COLON_COLOR
 
     busy_bar.display_draw(
         types.DisplayElements(
@@ -71,35 +71,56 @@ def draw_clock(
                 types.TextElement(
                     id="date",
                     text=date_text,
-                    align="top_mid",
-                    x=SCREEN_WIDTH // 2,
+                    align="top_left",
+                    x=1,
                     y=-2,
                     font="small",
-                    color="#FFFFFFFF",
+                    color=TEXT_COLOR,
                     timeout=10,
                 ),
-                types.TextElement(
-                    id="time",
-                    text=time_text,
-                    align="top_mid",
-                    x=SCREEN_WIDTH // 2,
-                    y=4,
-                    font="large",
-                    color="#FFFFFFFF",
-                    timeout=10,
-                ),
+                *[
+                    types.TextElement(
+                        id=f"time_{part_name}",
+                        text=part_text,
+                        align="top_mid",
+                        x=x,
+                        y=4,
+                        font="large",
+                        color=TEXT_COLOR,
+                        timeout=10,
+                    )
+                    for part_name, part_text, x in zip(
+                        ("hours", "minutes", "seconds"),
+                        time_parts,
+                        TIME_GROUP_X_POSITIONS,
+                    )
+                ],
+                *[
+                    types.TextElement(
+                        id=f"time_colon_{index}",
+                        text=":",
+                        align="top_mid",
+                        x=x,
+                        y=4,
+                        font="large",
+                        color=colon_color,
+                        timeout=10,
+                    )
+                    for index, x in enumerate(COLON_X_POSITIONS)
+                ],
                 types.TextElement(
                     id="timezone",
                     text=timezone_text,
-                    align="top_mid",
-                    x=SCREEN_WIDTH // 2,
-                    y=13,
+                    align="top_right",
+                    x=SCREEN_WIDTH - 1,
+                    y=-2,
                     font="small",
-                    color="#FFFFFFFF",
+                    color=TEXT_COLOR,
                     timeout=10,
                 ),
             ],
-        )
+        ),
+        clear_before_draw=clear_before_draw,
     )
 
 
@@ -139,7 +160,7 @@ def main() -> int:
     with BusyBar(DEVICE_ADDRESS) as busy_bar:
         if args.capture_screen:
             try:
-                draw_clock(busy_bar, TIMEZONES[0], colons_visible=True)
+                draw_clock(busy_bar, TIMEZONES[0], clear_before_draw=True)
                 time.sleep(0.1)
                 path = capture_screen(busy_bar, args.capture_screen)
                 LOGGER.info("Saved screen capture to %s", path)
@@ -150,13 +171,19 @@ def main() -> int:
 
         try:
             cycle_started = time.monotonic()
+            first_draw = True
             while True:
                 try:
                     elapsed = time.monotonic() - cycle_started
                     timezone_index = int(elapsed / args.timezone_interval) % len(
                         TIMEZONES
                     )
-                    draw_clock(busy_bar, TIMEZONES[timezone_index])
+                    draw_clock(
+                        busy_bar,
+                        TIMEZONES[timezone_index],
+                        clear_before_draw=first_draw,
+                    )
+                    first_draw = False
                 except exceptions.BusyBarError as exc:
                     LOGGER.error("Failed to update display: %s", exc)
 
