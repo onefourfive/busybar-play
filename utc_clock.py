@@ -43,11 +43,24 @@ def capture_screen(
     return path
 
 
-def draw_clock(busy_bar: BusyBar, display_timezone: ZoneInfo | timezone) -> None:
+def format_time(now: datetime, colons_visible: bool) -> str:
+    """Format the time, hiding colons during the dim half of the pulse."""
+    formatted = now.strftime("%H:%M:%S")
+    return formatted if colons_visible else formatted.replace(":", " ")
+
+
+def draw_clock(
+    busy_bar: BusyBar,
+    display_timezone: ZoneInfo | timezone,
+    *,
+    colons_visible: bool | None = None,
+) -> None:
     now = datetime.now(display_timezone)
+    if colons_visible is None:
+        colons_visible = now.microsecond < 500_000
 
     date_text = now.strftime("%Y.%m.%d")
-    time_text = now.strftime("%H:%M")
+    time_text = format_time(now, colons_visible)
     timezone_text = now.strftime("%Z")
 
     busy_bar.display_draw(
@@ -126,7 +139,7 @@ def main() -> int:
     with BusyBar(DEVICE_ADDRESS) as busy_bar:
         if args.capture_screen:
             try:
-                draw_clock(busy_bar, TIMEZONES[0])
+                draw_clock(busy_bar, TIMEZONES[0], colons_visible=True)
                 time.sleep(0.1)
                 path = capture_screen(busy_bar, args.capture_screen)
                 LOGGER.info("Saved screen capture to %s", path)
@@ -147,8 +160,9 @@ def main() -> int:
                 except exceptions.BusyBarError as exc:
                     LOGGER.error("Failed to update display: %s", exc)
 
-                # Update shortly after each UTC second rolls over.
-                time.sleep(1)
+                # Update shortly after each half-second pulse boundary.
+                now = time.time()
+                time.sleep(0.5 - (now % 0.5) + 0.01)
         except KeyboardInterrupt:
             LOGGER.info("Stopped.")
 
