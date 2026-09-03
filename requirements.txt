@@ -1,2 +1,2 @@
-requests
-Pillow
+# Requires Python 3.10 or newer.
+busylib==2.0.2
